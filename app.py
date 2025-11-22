@@ -57,6 +57,7 @@ class SolarisModel:
         self.shocks.append(shock)
 
     def integral_kernel(self, a: float, b: float) -> float:
+        # Esta es la integral de e^(-rt) desde el inicio del shock (a) hasta el final (b)
         if b <= a: return 0.0
         if abs(self.r) < 1e-9: return b - a
         return (math.exp(-self.r * a) - math.exp(-self.r * b)) / self.r
@@ -88,6 +89,7 @@ class SolarisModel:
     def calcular_impacto_shock(self, shock: Shock) -> float:
         if not shock.activo or shock.tiempo >= self.T:
             return 0.0
+        # El valor es Magnitud * Factor de Descuento Integral
         factor_descuento = self.integral_kernel(shock.tiempo, self.T)
         return float(shock.magnitud * factor_descuento)
 
@@ -171,9 +173,23 @@ def main():
     # Cálculos
     vpn_base = modelo.calcular_vpn_base()
     impactos = []
+    # Guardamos datos adicionales para la tabla explicativa
+    explicacion_shocks = [] 
+
     for s in shocks_to_process:
         val = modelo.calcular_impacto_shock(s)
+        # Factor de descuento integral = (e^-rt - e^-rT)/r
+        factor = modelo.integral_kernel(s.tiempo, modelo.T)
+        
         impactos.append({"nombre": s.nombre, "valor": val, "tiempo": s.tiempo, "magnitud": s.magnitud})
+        explicacion_shocks.append({
+            "Evento": s.nombre,
+            "Inicio (t)": s.tiempo,
+            "Horizonte (T)": T_input,
+            "Magnitud (Δ)": s.magnitud,
+            "Factor Descuento ∫": factor,
+            "Valor Presente": val
+        })
     
     vpn_shocks = sum(x['valor'] for x in impactos)
     vpn_total = vpn_base + vpn_shocks
@@ -218,48 +234,81 @@ def main():
         st.dataframe(pd.DataFrame(impactos))
 
     # ==============================================================================
-    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN (MEJORADA)
+    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN
     # ==============================================================================
     
     st.markdown("---")
     st.subheader("🧮 Estructura del Operador Híbrido")
     st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos.")
 
-    # Definir string LaTeX de f(t) según selección
     if mode_sel == 'lineal':
         ft_latex = rf"({A_input:,.0f} + {B_input:,.0f}t)"
     else:
         ft_latex = rf"({A_input:,.0f} \cdot e^{{{B_input}t}})"
 
-    # 1. Formulación Matemática (Simbólica)
+    # 1. Formulación
     st.markdown("#### 1. Formulación Matemática")
     st.latex(rf"""
-    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Continuo}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
+    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Base Continua}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
     """)
 
-    # 2. Desglose de Componentes (Integral Explícita + Nombres Shocks)
+    # 2. Desglose
     st.markdown("#### 2. Desglose de Componentes")
-    
-    # Creamos la representación visual de la integral con los datos reales dentro
     integral_visual = rf"\left[ \int_{{0}}^{{{T_input}}} {ft_latex} e^{{-{r_input}t}} dt \right]"
-    
     latex_formula_names = rf"\mathcal{{H}}_K = {integral_visual}"
     for s in impactos:
         s_clean = s['nombre'].replace(" ", "\\;")
         latex_formula_names += rf" + (\text{{{s_clean}}})"
-    
     st.latex(latex_formula_names)
 
-    # 3. Instanciación Numérica (Valores Finales)
+    # 3. Instanciación
     st.markdown("#### 3. Instanciación Numérica")
     str_vals = f"{vpn_base:,.0f}"
     for s in impactos:
         val = s['valor']
         str_vals += rf" + ({val:,.0f})"
+    st.latex(rf"\mathcal{{H}}_K = {str_vals} = \mathbf{{ {vpn_total:,.0f} }}")
+
+    # ==============================================================================
+    # NUEVA SECCIÓN: EXPLICACIÓN DETALLADA DE CÁLCULO DE CHOQUES
+    # ==============================================================================
     
-    st.latex(rf"""
-    \mathcal{{H}}_K = {str_vals} = \mathbf{{ {vpn_total:,.0f} }}
-    """)
+    st.markdown("---")
+    with st.expander("🔎 Desglose: ¿Cómo se calcula el valor de cada Choque?", expanded=False):
+        st.markdown("""
+        Un "Choque" o Evento Discreto no es un pago único. Es un **cambio permanente en el nivel del flujo** desde el momento $t$ hasta el horizonte $T$.
+        
+        El valor presente de un choque de magnitud $\Delta$ que ocurre en el tiempo $t$ se calcula acumulando (integrando) el factor de descuento:
+        """)
+        
+        # Fórmula explicativa
+        st.latex(r"""
+        \text{Valor}(E_i) = \Delta \times \int_{t}^{T} e^{-r \tau} d\tau = \Delta \times \left[ \frac{e^{-r t} - e^{-r T}}{r} \right]
+        """)
+        
+        st.markdown("**Tabla de Cálculo Paso a Paso:**")
+        if explicacion_shocks:
+            df_explicacion = pd.DataFrame(explicacion_shocks)
+            
+            # Formateo para que se vea bonito en la tabla
+            st.dataframe(
+                df_explicacion.style.format({
+                    "Inicio (t)": "{:.1f}",
+                    "Horizonte (T)": "{:.1f}",
+                    "Magnitud (Δ)": "${:,.0f}",
+                    "Factor Descuento ∫": "{:.4f}",  # 4 decimales para ver el factor
+                    "Valor Presente": "${:,.2f}"
+                }),
+                use_container_width=True
+            )
+            
+            st.info("""
+            * **Magnitud (+):** El evento agrega valor (ej. Subsidio). El cálculo es positivo.
+            * **Magnitud (-):** El evento destruye valor (ej. Fallo). El cálculo es negativo, restando al total.
+            * **Factor Descuento:** Representa cuántos años de flujo "efectivo" vale ese choque hoy. Un choque temprano vale más que uno tardío.
+            """)
+        else:
+            st.warning("No hay eventos activos para mostrar el desglose.")
 
 def asdict(shock: Shock):
     return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
