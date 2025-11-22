@@ -285,21 +285,28 @@ def main():
         lambda_h = st.slider("Prioridad Nueva Información ($\lambda$)", 0.0, 1.0, 0.6, 0.05)
         r_ago = st.slider("Orden Fraccionario ($r$)", 0.1, 1.5, 0.5, 0.1)
         hk_val, comp_trend, comp_jump, weights = calcular_acumulacion_hibrida(y_disc, r_ago, lambda_h)
-        st.metric("Valor $\mathcal{H}_K$", f"${hk_val:,.0f}")
+        st.metric("Resultado", f"${hk_val:,.0f}")
 
     with col_math_viz:
-        st.markdown("#### Instanciación Numérica")
+        st.markdown("#### Representación del Operador")
         
-        str_trend = f"({1-lambda_h:.2f}) \\times [{comp_trend:,.0f}]"
-        str_jump = f"({lambda_h:.2f}) \\times [{comp_jump:,.0f}]"
+        # 1. Formula Simbólica Pura (Definición)
+        st.latex(r"\mathcal{H}_K = (1-\lambda) \underbrace{\sum_{i=1}^n w_i x_i}_{\text{Memoria}} + \lambda \underbrace{x_n}_{\text{Impacto}}")
         
-        # CORRECCIÓN AQUÍ: Usamos {{H}} para escapar las llaves en f-string
+        st.markdown("#### Sustitución de Variables")
+        
+        # 2. Formula con variables reemplazadas (pero manteniendo la estructura de suma)
+        # Usamos {{ }} para escapar llaves en f-strings de Python
+        c_trend = 1 - lambda_h
+        c_shock = lambda_h
+        xn_val = y_disc[-1]
+        
         st.latex(rf"""
-        \mathcal{{H}}_K = {str_trend} + {str_jump} = \mathbf{{ {hk_val:,.2f} }}
+        \mathcal{{H}}_K = \underbrace{{ ({c_trend:.2f}) \sum w_i x_i }}_{{\text{{Tendencia}} (r={r_ago})}} + \underbrace{{ ({c_shock:.2f}) \cdot {xn_val:,.0f} }}_{{\text{{Salto}} (x_n)}} = \mathbf{{{hk_val:,.2f}}}
         """)
         
-        st.markdown("**Datos Recientes**")
-        st.dataframe(pd.DataFrame({"t": t_disc, "x(t)": y_disc}).T)
+        st.markdown("**Muestra ($x_i$) y Pesos calculados ($w_i$)**")
+        st.dataframe(pd.DataFrame({"t": t_disc, "Input x(t)": y_disc, "Peso w(t)": weights}).T)
 
 def asdict(shock: Shock):
     return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
