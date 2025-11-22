@@ -2,9 +2,8 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import scipy.special as sc
 from dataclasses import dataclass, asdict
-from typing import List, Tuple
+from typing import List
 import math
 
 # ---------- CONFIGURACIÓN GENERAL ----------
@@ -49,7 +48,7 @@ class SolarisModel:
         self.r = float(r)
         self.T = float(T)
         self.A = float(A)
-        self.param_2 = float(param_B_or_g) # Puede ser B (pendiente) o g (growth)
+        self.param_2 = float(param_B_or_g) 
         self.mode = mode
         self.shocks: List[Shock] = []
 
@@ -57,7 +56,6 @@ class SolarisModel:
         self.shocks.append(shock)
 
     def integral_kernel(self, a: float, b: float) -> float:
-        # Esta es la integral de e^(-rt) desde el inicio del shock (a) hasta el final (b)
         if b <= a: return 0.0
         if abs(self.r) < 1e-9: return b - a
         return (math.exp(-self.r * a) - math.exp(-self.r * b)) / self.r
@@ -69,7 +67,6 @@ class SolarisModel:
         p2 = self.param_2
         
         if self.mode == 'lineal':
-            # f(t) = A + B*t
             if abs(r) < 1e-9:
                 return A * T + 0.5 * p2 * T**2
             term_A = A * (1 - math.exp(-r * T)) / r
@@ -77,19 +74,16 @@ class SolarisModel:
             return term_A + term_B
             
         elif self.mode == 'exponencial':
-            # f(t) = A * e^(g*t)
             g = p2
             net_rate = r - g
             if abs(net_rate) < 1e-9:
                 return A * T
             return A * (1 - math.exp(-net_rate * T)) / net_rate
-        
         return 0.0
 
     def calcular_impacto_shock(self, shock: Shock) -> float:
         if not shock.activo or shock.tiempo >= self.T:
             return 0.0
-        # El valor es Magnitud * Factor de Descuento Integral
         factor_descuento = self.integral_kernel(shock.tiempo, self.T)
         return float(shock.magnitud * factor_descuento)
 
@@ -99,12 +93,52 @@ class SolarisModel:
             y_base = self.A + self.param_2 * t
         else:
             y_base = self.A * np.exp(self.param_2 * t)
-            
         y_total = y_base.copy()
         for s in self.shocks:
             if s.activo and s.tiempo < self.T:
                 y_total += np.where(t >= s.tiempo, s.magnitud, 0)
         return t, y_base, y_total
+    
+    # --- FUNCIÓN PARA CALCULAR EL MÉTODO TRADICIONAL (DCF) ---
+    def calcular_tradicional_dcf(self) -> Tuple[float, pd.DataFrame]:
+        """
+        Simula el cálculo tradicional: flujos discretos al final de cada año.
+        Ignora la continuidad y asume que los shocks ocurren en el año entero.
+        """
+        years = np.arange(1, int(self.T) + 1)
+        dcf_val = 0.0
+        details = []
+        
+        for yr in years:
+            # 1. Flujo Base al final del año t
+            if self.mode == 'lineal':
+                cf_base = self.A + self.param_2 * yr
+            else:
+                cf_base = self.A * np.exp(self.param_2 * yr)
+            
+            # 2. Shocks (Simplificación tradicional: Sumar al flujo del año si ocurre en ese año)
+            # En DCF tradicional, no se integra, se suma al CF del periodo.
+            cf_shocks = 0.0
+            for s in self.shocks:
+                # Si el shock ocurre durante este año (ej: entre año 1 y 2, se cobra en t=2)
+                if (yr - 1) < s.tiempo <= yr and s.activo:
+                    # En tradicional, a menudo se asume que el impacto es en el flujo de caja del año
+                    cf_shocks += s.magnitud 
+            
+            total_cf = cf_base + cf_shocks
+            disc_factor = 1 / ((1 + self.r) ** yr)
+            pv = total_cf * disc_factor
+            
+            dcf_val += pv
+            details.append({
+                "Año": yr, 
+                "CF Base": cf_base, 
+                "CF Shocks": cf_shocks, 
+                "Total CF": total_cf, 
+                "PV (Descontado)": pv
+            })
+            
+        return dcf_val, pd.DataFrame(details)
 
 # ---------- MAIN ----------
 
@@ -122,16 +156,15 @@ def main():
     
     with st.sidebar.expander("2. Función Base f(t)", expanded=True):
         tipo_funcion = st.selectbox("Modelo de Flujo", ["Lineal (A + Bt)", "Exponencial (A * e^gt)"])
-        
         col_a, col_b = st.columns(2)
         A_input = col_a.number_input("Inicial (A)", value=500.0, step=50.0)
         
         if "Lineal" in tipo_funcion:
             mode_sel = 'lineal'
-            B_input = col_b.number_input("Pendiente (B)", value=50.0, step=10.0, help="Cambio lineal por año")
+            B_input = col_b.number_input("Pendiente (B)", value=50.0, step=10.0)
         else:
             mode_sel = 'exponencial'
-            B_input = col_b.number_input("Crecimiento (g)", value=0.05, step=0.01, format="%.2f", help="Tasa de crecimiento compuesto")
+            B_input = col_b.number_input("Crecimiento (g)", value=0.05, step=0.01, format="%.2f")
 
     modelo = SolarisModel(r_input, T_input, A_input, B_input, mode=mode_sel)
 
@@ -159,7 +192,7 @@ def main():
                 obj_shock = Shock(id=shock['id'], nombre=shock['nombre'], tiempo=shock['tiempo'], magnitud=shock['magnitud'])
                 modelo.add_shock(obj_shock)
                 shocks_to_process.append(obj_shock)
-
+                
     with st.sidebar.expander("➕ Agregar Evento", expanded=False):
         with st.form("add_shock"):
             n_name = st.text_input("Nombre", "Nuevo Evento")
@@ -170,35 +203,24 @@ def main():
                 st.session_state.custom_shocks.append({"id": f"C{len(st.session_state.custom_shocks)}", "nombre": n_name, "tiempo": n_time, "magnitud": n_mag})
                 st.rerun()
 
-    # Cálculos
+    # Cálculos Híbridos
     vpn_base = modelo.calcular_vpn_base()
     impactos = []
-    # Guardamos datos adicionales para la tabla explicativa
-    explicacion_shocks = [] 
-
     for s in shocks_to_process:
         val = modelo.calcular_impacto_shock(s)
-        # Factor de descuento integral = (e^-rt - e^-rT)/r
-        factor = modelo.integral_kernel(s.tiempo, modelo.T)
-        
         impactos.append({"nombre": s.nombre, "valor": val, "tiempo": s.tiempo, "magnitud": s.magnitud})
-        explicacion_shocks.append({
-            "Evento": s.nombre,
-            "Inicio (t)": s.tiempo,
-            "Horizonte (T)": T_input,
-            "Magnitud (Δ)": s.magnitud,
-            "Factor Descuento ∫": factor,
-            "Valor Presente": val
-        })
     
     vpn_shocks = sum(x['valor'] for x in impactos)
     vpn_total = vpn_base + vpn_shocks
     variacion_pct = (vpn_shocks / vpn_base) * 100 if vpn_base != 0 else 0
 
+    # Cálculo Tradicional (Para comparación)
+    vpn_tradicional, df_tradicional = modelo.calcular_tradicional_dcf()
+
     # --- DASHBOARD ---
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:+,.0f} eventos")
-    k2.metric("Variación vs Base", f"{variacion_pct:+.1f}%", delta="Impacto Relativo", delta_color="off")
+    k1.metric("VPN Híbrido (Propio)", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:+,.0f} eventos")
+    k2.metric("Variación vs Base", f"{variacion_pct:+.1f}%", delta="Impacto", delta_color="off")
     k3.metric("Valor Base", f"${vpn_base:,.0f}", delta="Estructural", delta_color="off")
     k4.metric("Tasa Efectiva", f"{r_input*100:.1f}%", f"T={T_input}")
 
@@ -234,35 +256,26 @@ def main():
         st.dataframe(pd.DataFrame(impactos))
 
     # ==============================================================================
-    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN
+    # SECCIÓN 1: FÓRMULA DE ACUMULACIÓN (MÉTODO PROPIO)
     # ==============================================================================
     
     st.markdown("---")
-    st.subheader("🧮 Estructura del Operador Híbrido")
-    st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos.")
+    st.subheader("🧮 Método Propio: Operador de Acumulación Híbrida")
+    st.markdown("Cálculo exacto utilizando integración continua y acumulación de eventos en tiempo real.")
 
     if mode_sel == 'lineal':
         ft_latex = rf"({A_input:,.0f} + {B_input:,.0f}t)"
     else:
         ft_latex = rf"({A_input:,.0f} \cdot e^{{{B_input}t}})"
 
-    # 1. Formulación
-    st.markdown("#### 1. Formulación Matemática")
+    # Formulación
+    st.markdown("#### 1. Formulación Matemática (Continua)")
     st.latex(rf"""
-    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Base Continua}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
+    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Exacto}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
     """)
 
-    # 2. Desglose
-    st.markdown("#### 2. Desglose de Componentes")
-    integral_visual = rf"\left[ \int_{{0}}^{{{T_input}}} {ft_latex} e^{{-{r_input}t}} dt \right]"
-    latex_formula_names = rf"\mathcal{{H}}_K = {integral_visual}"
-    for s in impactos:
-        s_clean = s['nombre'].replace(" ", "\\;")
-        latex_formula_names += rf" + (\text{{{s_clean}}})"
-    st.latex(latex_formula_names)
-
-    # 3. Instanciación
-    st.markdown("#### 3. Instanciación Numérica")
+    # Instanciación
+    st.markdown("#### 2. Instanciación Numérica")
     str_vals = f"{vpn_base:,.0f}"
     for s in impactos:
         val = s['valor']
@@ -270,45 +283,33 @@ def main():
     st.latex(rf"\mathcal{{H}}_K = {str_vals} = \mathbf{{ {vpn_total:,.0f} }}")
 
     # ==============================================================================
-    # NUEVA SECCIÓN: EXPLICACIÓN DETALLADA DE CÁLCULO DE CHOQUES
+    # SECCIÓN 2: BENCHMARKING (MÉTODO TRADICIONAL)
     # ==============================================================================
     
     st.markdown("---")
-    with st.expander("🔎 Desglose: ¿Cómo se calcula el valor de cada Choque?", expanded=False):
-        st.markdown("""
-        Un "Choque" o Evento Discreto no es un pago único. Es un **cambio permanente en el nivel del flujo** desde el momento $t$ hasta el horizonte $T$.
+    st.subheader("🆚 Benchmarking: Comparativa con Método Tradicional (DCF Discreto)")
+    
+    col_trad_1, col_trad_2 = st.columns([1, 1])
+    
+    with col_trad_1:
+        st.markdown("**Método Tradicional (Discreto)**")
+        st.markdown("Suma de flujos al final de cada año. Ignora el valor del dinero *intra-anual* y la continuidad.")
+        st.latex(r"\text{VPN}_{trad} = \sum_{t=1}^{T} \frac{CF_t}{(1+r)^t}")
         
-        El valor presente de un choque de magnitud $\Delta$ que ocurre en el tiempo $t$ se calcula acumulando (integrando) el factor de descuento:
+        delta_val = vpn_total - vpn_tradicional
+        delta_pct = (delta_val / vpn_tradicional) * 100 if vpn_tradicional != 0 else 0
+        
+        st.metric("Resultado Tradicional", f"${vpn_tradicional:,.0f}")
+        
+    with col_trad_2:
+        st.markdown("**Diferencia (Error de Discretización)**")
+        st.info(f"""
+        El Método Híbrido captura **${delta_val:,.0f}** adicionales ({delta_pct:+.2f}%) que el método tradicional pierde por aproximación.
         """)
-        
-        # Fórmula explicativa
-        st.latex(r"""
-        \text{Valor}(E_i) = \Delta \times \int_{t}^{T} e^{-r \tau} d\tau = \Delta \times \left[ \frac{e^{-r t} - e^{-r T}}{r} \right]
-        """)
-        
-        st.markdown("**Tabla de Cálculo Paso a Paso:**")
-        if explicacion_shocks:
-            df_explicacion = pd.DataFrame(explicacion_shocks)
-            
-            # Formateo para que se vea bonito en la tabla
-            st.dataframe(
-                df_explicacion.style.format({
-                    "Inicio (t)": "{:.1f}",
-                    "Horizonte (T)": "{:.1f}",
-                    "Magnitud (Δ)": "${:,.0f}",
-                    "Factor Descuento ∫": "{:.4f}",  # 4 decimales para ver el factor
-                    "Valor Presente": "${:,.2f}"
-                }),
-                use_container_width=True
-            )
-            
-            st.info("""
-            * **Magnitud (+):** El evento agrega valor (ej. Subsidio). El cálculo es positivo.
-            * **Magnitud (-):** El evento destruye valor (ej. Fallo). El cálculo es negativo, restando al total.
-            * **Factor Descuento:** Representa cuántos años de flujo "efectivo" vale ese choque hoy. Un choque temprano vale más que uno tardío.
-            """)
-        else:
-            st.warning("No hay eventos activos para mostrar el desglose.")
+        st.progress(min(100, max(0, int(50 + delta_pct*5)))) # Visual bar centered
+    
+    with st.expander("Ver tabla de cálculo Tradicional (Año a Año)", expanded=False):
+        st.dataframe(df_tradicional.style.format("${:,.2f}"))
 
 def asdict(shock: Shock):
     return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
