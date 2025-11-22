@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.special as sc
 from dataclasses import dataclass, asdict
-from typing import List, Tuple  # <--- AQUÍ ESTABA EL ERROR, AHORA CORREGIDO
+from typing import List, Tuple  # Importación necesaria
 import math
 
 # ---------- CONFIGURACIÓN GENERAL ----------
@@ -40,19 +40,10 @@ st.markdown("""
     
     /* Ajustes de Sidebar */
     [data-testid="stSidebar"] { background-color: #111827; border-right: 1px solid #374151; }
-    
-    /* Estilo para contenedores matemáticos */
-    .math-box {
-        background-color: #161b22;
-        border-left: 4px solid #34D399;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
-# ---------- LÓGICA DEL MODELO (Optimizado) ----------
+# ---------- LÓGICA DEL MODELO ----------
 
 @dataclass
 class Shock:
@@ -141,34 +132,22 @@ def calcular_matriz_sensibilidad(A, B, r_start, r_end, t_start, t_end, shocks_da
 
 def calcular_acumulacion_hibrida(series: np.ndarray, r_order: float, lambda_param: float):
     """
-    Implementación matemática del Operador H_K descrito en el paper.
-    Combina r-AGO (Tendencia) con Prioridad de Nueva Información (Salto).
+    Implementación matemática del Operador H_K.
     """
     n = len(series)
-    k = np.arange(1, n + 1)
-    
-    # 1. Componente de Memoria (r-AGO Fractional Accumulation)
-    # Aproximación numérica usando pesos binomiales generalizados
     weights = np.array([sc.gamma(r_order + n - i) / (sc.gamma(n - i + 1) * sc.gamma(r_order)) for i in range(1, n + 1)])
-    # Normalizar pesos para el ejemplo visual (manteniendo escala)
     trend_component = np.sum(series * weights)
-    
-    # 2. Componente de Salto (Nueva Información / Dirac)
-    jump_component = series[-1] # El dato más reciente x(n)
-    
-    # 3. Hibridación
+    jump_component = series[-1]
     hk_value = (1 - lambda_param) * trend_component + lambda_param * jump_component
-    
     return hk_value, trend_component, jump_component, weights
 
 # ---------- INTERFAZ DE USUARIO ----------
 
 def main():
-    # Encabezado
     col_title, col_logo = st.columns([4, 1])
     with col_title:
         st.title("💠 Operador de Acumulación Híbrida")
-        st.markdown("Calculadora de Valoración Dinámica con **Kernel Exponencial y Lógica de Sistemas Grises**")
+        st.markdown("Calculadora de Valoración Dinámica con **Kernel Exponencial**")
     
     # --- SIDEBAR ---
     st.sidebar.header("⚙️ Configuración")
@@ -178,15 +157,13 @@ def main():
         T_input = st.number_input("Horizonte (T años)", 1.0, 50.0, 10.0, 0.5)
     
     with st.sidebar.expander("2. Flujo Base (Continuo)", expanded=False):
-        st.markdown("Define $f(t) = A + B \cdot t$")
         col_a, col_b = st.columns(2)
         A_input = col_a.number_input("Inicial (A)", value=500.0, step=50.0)
         B_input = col_b.number_input("Crecimiento (B)", value=50.0, step=10.0)
 
-    # Modelo inicial
     modelo = SolarisModel(r_input, T_input, A_input, B_input)
 
-    # Gestión de Shocks (Eventos Discretos)
+    # Gestión de Shocks
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚡ Eventos Discretos")
     
@@ -241,135 +218,88 @@ def main():
     vpn_shocks = sum(x['valor'] for x in impactos)
     vpn_total = vpn_base + vpn_shocks
 
-    # --- DASHBOARD PRINCIPAL ---
-    
+    # --- DASHBOARD ---
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:,.0f} por eventos")
-    k2.metric("Valor Base (Continuo)", f"${vpn_base:,.0f}", delta="Estructural")
+    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:,.0f} eventos")
+    k2.metric("Valor Base", f"${vpn_base:,.0f}", delta="Estructural")
     k3.metric("Impacto Eventos", f"${vpn_shocks:,.0f}", delta_color="off")
-    k4.metric("Tasa Efectiva", f"{r_input*100:.1f}%", f"T={T_input} años")
+    k4.metric("Tasa Efectiva", f"{r_input*100:.1f}%", f"T={T_input}")
 
     st.markdown("---")
 
     tab_chart, tab_waterfall, tab_sens, tab_data = st.tabs([
-        "📈 Trayectoria Dinámica", 
-        "🧱 Descomposición (Waterfall)", 
-        "🎯 Mapa de Sensibilidad", 
-        "📋 Datos"
+        "📈 Trayectoria", "🧱 Descomposición", "🎯 Sensibilidad", "📋 Datos"
     ])
 
-    # --- GRAFICO DE TRAYECTORIA ---
     with tab_chart:
         t, y_base, y_total = modelo.generar_trayectorias()
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=t, y=y_base, mode='lines', name='Flujo Base', line=dict(color='#4B5563', width=1, dash='dash')))
-        fig.add_trace(go.Scatter(x=t, y=y_total, mode='lines', name='Flujo Híbrido', line=dict(color='#60A5FA', width=3), fill='tonexty', fillcolor='rgba(96, 165, 250, 0.1)'))
-
+        fig.add_trace(go.Scatter(x=t, y=y_base, mode='lines', name='Base', line=dict(color='#4B5563', width=1, dash='dash')))
+        fig.add_trace(go.Scatter(x=t, y=y_total, mode='lines', name='Híbrido', line=dict(color='#60A5FA', width=3), fill='tonexty', fillcolor='rgba(96, 165, 250, 0.1)'))
         for s in shocks_to_process:
             color = '#34D399' if s.magnitud > 0 else '#F87171'
-            fig.add_vline(x=s.tiempo, line_dash="dot", line_color=color, opacity=0.6)
-            fig.add_annotation(x=s.tiempo, y=max(y_total)*1.05, text=s.nombre, showarrow=False, font=dict(color=color, size=10), yshift=10)
-
-        fig.update_layout(title="Dinámica del Flujo de Caja Instantáneo", xaxis_title="Tiempo (años)", yaxis_title="Flujo ($/año)", template="plotly_dark", hovermode="x unified", height=450, margin=dict(l=20, r=20, t=60, b=20), legend=dict(orientation="h", y=1.02, x=1, xanchor="right"))
+            fig.add_vline(x=s.tiempo, line_dash="dot", line_color=color)
+            fig.add_annotation(x=s.tiempo, y=max(y_total)*1.05, text=s.nombre, showarrow=False, font=dict(color=color, size=10))
+        fig.update_layout(title="Dinámica del Flujo", template="plotly_dark", height=450, hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- WATERFALL CHART ---
     with tab_waterfall:
-        wf_labels = ["Base Estructural"] + [x['nombre'] for x in impactos] + ["VPN Total"]
-        wf_values = [vpn_base] + [x['valor'] for x in impactos] + [0]
-        measure_types = ["absolute"] + ["relative"] * len(impactos) + ["total"]
+        wf_labels = ["Base"] + [x['nombre'] for x in impactos] + ["Total"]
         wf_y = [vpn_base] + [x['valor'] for x in impactos] + [0]
-
+        measure_types = ["absolute"] + ["relative"] * len(impactos) + ["total"]
         fig_wf = go.Figure(go.Waterfall(
-            name="Composición", orientation="v", measure=measure_types, x=wf_labels, y=wf_y,
-            textposition="outside", text=[f"${v/1000:.1f}k" for v in wf_y[:-1]] + [f"${vpn_total/1000:.1f}k"],
+            name="20", orientation="v", measure=measure_types, x=wf_labels, y=wf_y,
+            text=[f"${v/1000:.1f}k" for v in wf_y[:-1]] + [f"${vpn_total/1000:.1f}k"],
             connector={"line": {"color": "rgb(63, 63, 63)"}}, decreasing={"marker": {"color": "#F87171"}}, increasing={"marker": {"color": "#34D399"}}, totals={"marker": {"color": "#60A5FA"}}
         ))
-        fig_wf.update_layout(title="Descomposición del Valor (Acumulación)", template="plotly_dark", yaxis_title="VPN ($)", height=500)
+        fig_wf.update_layout(title="Descomposición del Valor", template="plotly_dark", height=500)
         st.plotly_chart(fig_wf, use_container_width=True)
 
-    # --- SENSIBILIDAD (HEATMAP) ---
     with tab_sens:
         r_vals, t_vals, z_vals = calcular_matriz_sensibilidad(
             A_input, B_input, max(0.01, r_input - 0.05), r_input + 0.05, max(1.0, T_input - 5), T_input + 5, shocks_data_for_cache
         )
-        fig_hm = go.Figure(data=go.Heatmap(z=z_vals, x=t_vals, y=r_vals, colorscale='Viridis', colorbar=dict(title="VPN ($)"), hovertemplate='T: %{x:.1f} años<br>r: %{y:.1%}<br>VPN: $%{z:,.0f}<extra></extra>'))
-        fig_hm.add_trace(go.Scatter(x=[T_input], y=[r_input], mode='markers', marker=dict(color='red', symbol='x', size=12, line=dict(width=2, color='white')), name='Escenario Actual'))
-        fig_hm.update_layout(template="plotly_dark", xaxis_title="Horizonte (T)", yaxis_title="Tasa (r)", height=500)
+        fig_hm = go.Figure(data=go.Heatmap(z=z_vals, x=t_vals, y=r_vals, colorscale='Viridis'))
+        fig_hm.add_trace(go.Scatter(x=[T_input], y=[r_input], mode='markers', marker=dict(color='red', symbol='x', size=12)))
+        fig_hm.update_layout(template="plotly_dark", height=500, title="Sensibilidad VPN (r vs T)")
         st.plotly_chart(fig_hm, use_container_width=True)
 
-    # --- TABLA DE DATOS ---
     with tab_data:
-        data_rows = [{"Componente": "Flujo Base", "Tiempo (t)": "-", "Magnitud": f"{A_input} + {B_input}t", "VPN": vpn_base}]
-        for item in impactos:
-            data_rows.append({"Componente": item['nombre'], "Tiempo (t)": f"{item['tiempo']:.1f}", "Magnitud": f"{item['magnitud']:.2f}", "VPN": item['valor']})
-        df = pd.DataFrame(data_rows)
-        st.dataframe(df.style.format({"VPN": "${:,.2f}"}), use_container_width=True)
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ CSV", data=csv, file_name="reporte.csv", mime="text/csv")
+        df = pd.DataFrame(impactos)
+        st.dataframe(df)
+        st.download_button("⬇️ CSV", df.to_csv().encode('utf-8'), "data.csv")
 
     # ==============================================================================
-    # APLICACIÓN MATEMÁTICA DEL OPERADOR H_K (SISTEMAS GRISES)
+    # APLICACIÓN MATEMÁTICA CORREGIDA
     # ==============================================================================
     
     st.markdown("---")
     st.subheader("🧮 Aplicación: Operador de Acumulación Híbrida ($\mathcal{H}_K$)")
-    st.markdown("""
-    > *Aplicación en tiempo real para muestras pequeñas ($n \le 10$). Descomposición según teorema de Lebesgue-Stieltjes y Principio de Duhamel.*
-    """)
-
-    # 1. Extraer datos recientes del modelo (Small Sample)
-    n_sample = 5 # "Muestra pequeña" típica en Grey Systems
+    
+    n_sample = 5
     t_disc, y_disc = modelo.obtener_datos_discretos(n_points=n_sample)
     
     col_math_ctrl, col_math_viz = st.columns([1, 2])
     
     with col_math_ctrl:
-        st.markdown("**Parámetros del Operador**")
-        st.info("Ajuste los pesos para calibrar la importancia de la historia vs. la innovación.")
-        
-        lambda_h = st.slider("Prioridad Nueva Información ($\lambda$)", 0.0, 1.0, 0.6, 0.05,
-                             help="1.0 = Solo importa el último dato (Salto/Dirac). 0.0 = Solo importa la historia acumulada.")
-        r_ago = st.slider("Orden Fraccionario ($r$)", 0.1, 1.5, 0.5, 0.1,
-                          help="Orden de acumulación. r<1 memoria de corto plazo, r>1 memoria persistente.")
-        
-        # Cálculo en tiempo real
+        lambda_h = st.slider("Prioridad Nueva Información ($\lambda$)", 0.0, 1.0, 0.6, 0.05)
+        r_ago = st.slider("Orden Fraccionario ($r$)", 0.1, 1.5, 0.5, 0.1)
         hk_val, comp_trend, comp_jump, weights = calcular_acumulacion_hibrida(y_disc, r_ago, lambda_h)
-        
-        st.write("")
-        st.metric("Valor Acumulado $\mathcal{H}_K$", f"${hk_val:,.0f}", 
-                  delta=f"Input Reciente: ${y_disc[-1]:,.0f}", delta_color="off")
+        st.metric("Valor $\mathcal{H}_K$", f"${hk_val:,.0f}")
 
     with col_math_viz:
-        # Visualización de la Ecuación
-        st.markdown("#### Estructura Matemática")
-        
-        # Construcción de string LaTeX con valores reales
-        # Simplificamos visualmente mostrando los dos últimos términos de la suma
-        latex_eq = r"""
-        \mathcal{H}_K(X) = \underbrace{(1-\lambda) \sum_{i=1}^{n} \frac{\Gamma(r+n-i)}{\Gamma(n-i+1)\Gamma(r)} x(i)}_{\text{Componente Continua (Tendencia)}} 
-        + \underbrace{\lambda \cdot x(n)}_{\text{Componente Salto (Dirac)}}
-        """
-        st.latex(latex_eq)
-        
         st.markdown("#### Instanciación Numérica")
         
-        # Crear una representación visual de la ecuación con números
         str_trend = f"({1-lambda_h:.2f}) \\times [{comp_trend:,.0f}]"
         str_jump = f"({lambda_h:.2f}) \\times [{comp_jump:,.0f}]"
         
+        # CORRECCIÓN AQUÍ: Usamos {{H}} para escapar las llaves en f-string
         st.latex(rf"""
-        \mathcal{H}_K = {str_trend} + {str_jump} = \mathbf{{ {hk_val:,.2f} }}
+        \mathcal{{H}}_K = {str_trend} + {str_jump} = \mathbf{{ {hk_val:,.2f} }}
         """)
         
-        # Pequeño dataframe explicativo de los datos usados
-        st.markdown("**Datos de Entrada (Muestra Pequeña - Últimos 5 periodos)**")
-        df_grey = pd.DataFrame({
-            "Periodo (t)": [f"t={x:.1f}" for x in t_disc],
-            "Flujo $x(t)$": y_disc,
-            "Peso Histórico (r-AGO)": weights
-        })
-        st.dataframe(df_grey.T, use_container_width=True)
+        st.markdown("**Datos Recientes**")
+        st.dataframe(pd.DataFrame({"t": t_disc, "x(t)": y_disc}).T)
 
 def asdict(shock: Shock):
     return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
