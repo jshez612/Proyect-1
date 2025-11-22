@@ -278,7 +278,7 @@ def main():
     # ==============================================================================
     
     st.markdown("---")
-    st.subheader("🧮 Estructura del Operador Híbrido (Método Propio)")
+    st.subheader("🧮 Estructura del Operador Híbrido")
     st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos.")
 
     if mode_sel == 'lineal':
