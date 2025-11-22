@@ -1,50 +1,49 @@
-primaryColor="#1f77b4"
-backgroundColor="#0E1117"
-secondaryBackgroundColor="#262730"
-textColor="#FAFAFA"
-font="sans serif"
-
-# 3. Escribir la aplicación
 import streamlit as st
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
-from scipy.integrate import quad
+import plotly.express as px
 from dataclasses import dataclass
-from typing import List
+from typing import List, Tuple
+import math
 
-# --- CONFIGURACIÓN VISUAL PRO ---
+# ---------- CONFIGURACIÓN GENERAL ----------
 st.set_page_config(
-    page_title="Solaris: Valuation Engine",
-    page_icon="☀️",
+    page_title="Operador de Acumulación Híbrida",
+    page_icon="💠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados (Reforzados para la Sidebar)
+# ---------- ESTILOS CSS PERSONALIZADOS ----------
 st.markdown("""
     <style>
-    /* Forzar visibilidad de inputs en la sidebar */
-    [data-testid="stSidebar"] input {
-        color: white !important;
-    }
-    /* Estilo para las métricas (KPIs) */
-    [data-testid="stMetric"] {
-        background-color: #262730; /* Fondo oscuro para coincidir con el tema */
-        padding: 15px;
-        border-radius: 10px;
-        border-left: 5px solid #1f77b4;
-    }
-    [data-testid="stMetricLabel"] { color: #FAFAFA !important; }
-    [data-testid="stMetricValue"] { color: #1f77b4 !important; }
+    /* Fondo general y fuentes */
+    .main { background-color: #0E1117; }
+    h1, h2, h3 { font-family: 'Helvetica Neue', sans-serif; font-weight: 600; }
     
-    /* Ajuste de checkboxes */
-    [data-testid="stCheckbox"] {
-        padding-top: 10px;
+    /* Tarjetas de métricas personalizadas */
+    div[data-testid="metric-container"] {
+        background-color: #1F2937;
+        border: 1px solid #374151;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s;
     }
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-2px);
+        border-color: #60A5FA;
+    }
+    label[data-testid="stMetricLabel"] { color: #9CA3AF !important; }
+    div[data-testid="stMetricValue"] { color: #F3F4F6 !important; font-size: 1.8rem !important; }
+    
+    /* Ajustes de Sidebar */
+    [data-testid="stSidebar"] { background-color: #111827; border-right: 1px solid #374151; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. LÓGICA MATEMÁTICA ---
+# ---------- LÓGICA DEL MODELO (Optimizado) ----------
 
 @dataclass
 class Shock:
@@ -56,190 +55,322 @@ class Shock:
     descripcion: str = ""
 
 class SolarisModel:
-    def __init__(self, r: float, T: float):
-        self.r = r
-        self.T = T
+    """
+    Motor de valoración analítica híbrida.
+    Calcula integrales exactas para evitar errores de discretización.
+    """
+    def __init__(self, r: float, T: float, A: float, B: float):
+        self.r = float(r)
+        self.T = float(T)
+        self.A = float(A)
+        self.B = float(B)
         self.shocks: List[Shock] = []
-
-    def flujo_base(self, t):
-        return 500 + 50 * t
-
-    def kernel(self, t):
-        return np.exp(-self.r * t)
 
     def add_shock(self, shock: Shock):
         self.shocks.append(shock)
 
-    def calcular_vpn_base(self):
-        integrando = lambda t: self.flujo_base(t) * self.kernel(t)
-        res, _ = quad(integrando, 0, self.T)
-        return res
+    def integral_kernel(self, a: float, b: float) -> float:
+        """Integral de e^(-rt) dt entre a y b"""
+        if b <= a: return 0.0
+        if abs(self.r) < 1e-9: return b - a
+        return (math.exp(-self.r * a) - math.exp(-self.r * b)) / self.r
 
-    def calcular_potencial_shock(self, shock: Shock):
+    def calcular_vpn_base(self) -> float:
+        """VPN de la parte continua f(t) = A + B*t"""
+        r, T, A, B = self.r, self.T, self.A, self.B
+        if abs(r) < 1e-9:
+            return A * T + 0.5 * B * T**2
+        term_A = A * (1 - math.exp(-r * T)) / r
+        term_B = B * ((1 - math.exp(-r * T)) / r**2 - T * math.exp(-r * T) / r)
+        return term_A + term_B
+
+    def calcular_impacto_shock(self, shock: Shock) -> float:
+        """Impacto en VPN de un salto discreto en el tiempo t"""
         if not shock.activo or shock.tiempo >= self.T:
             return 0.0
-        integral_k, _ = quad(self.kernel, shock.tiempo, self.T)
-        return shock.magnitud * integral_k
+        # Valor Presente del Shock = Magnitud * Integral(kernel) desde t hasta T
+        # Interpretación: El shock afecta el nivel de flujo desde t hasta el final T
+        factor_descuento = self.integral_kernel(shock.tiempo, self.T)
+        return float(shock.magnitud * factor_descuento)
 
-    def obtener_datos_grafica(self, pasos=1000):
+    def generar_trayectorias(self, pasos: int = 500):
         t = np.linspace(0, self.T, pasos)
-        y_base = self.flujo_base(t)
+        # Flujo Base: A + Bt
+        y_base = self.A + self.B * t
+        # Flujo Total: Base + Shocks (función escalón Heaviside)
         y_total = y_base.copy()
         for s in self.shocks:
-            if s.activo:
+            if s.activo and s.tiempo < self.T:
                 y_total += np.where(t >= s.tiempo, s.magnitud, 0)
         return t, y_base, y_total
 
-# --- 2. INTERFAZ DE USUARIO ---
+# Caché para cálculos pesados (Sensibilidad)
+@st.cache_data
+def calcular_matriz_sensibilidad(A, B, r_start, r_end, t_start, t_end, shocks_data):
+    """Genera una matriz de VPN variando r y T"""
+    r_range = np.linspace(r_start, r_end, 20)
+    t_range = np.linspace(t_start, t_end, 20)
+    z_values = []
+    
+    for r_val in r_range:
+        row = []
+        for t_val in t_range:
+            m = SolarisModel(r_val, t_val, A, B)
+            # Reconstruir shocks temporales para el cálculo
+            for s in shocks_data:
+                m.add_shock(Shock(**s))
+            
+            vpn = m.calcular_vpn_base() + sum(m.calcular_impacto_shock(s) for s in m.shocks)
+            row.append(vpn)
+        z_values.append(row)
+    
+    return r_range, t_range, np.array(z_values)
+
+# ---------- INTERFAZ DE USUARIO ----------
 
 def main():
-    col_header1, col_header2 = st.columns([3, 1])
-    with col_header1:
-        st.title("☀️ Solaris: Valuation Engine")
-        st.markdown(r"**Operador de Acumulación Híbrida ($\mathcal{H}_K$)** | *Real-time Sensitivity Analysis*")
+    # Encabezado
+    col_title, col_logo = st.columns([4, 1])
+    with col_title:
+        st.title("💠 Operador de Acumulación Híbrida")
+        st.markdown("Calculadora de Valoración Dinámica con **Kernel Exponencial**")
     
     # --- SIDEBAR ---
-    st.sidebar.header("🎛️ Panel de Control")
+    st.sidebar.header("⚙️ Configuración")
     
-    with st.sidebar.container():
-        st.subheader("Parámetros Globales")
-        r_input = st.sidebar.slider("Tasa de Descuento (r)", 0.0, 0.20, 0.08, 0.005, format="%.3f")
-        T_input = 10.0
+    with st.sidebar.expander("1. Parámetros Globales", expanded=True):
+        r_input = st.slider("Tasa de Descuento (r)", 0.0, 0.25, 0.08, 0.005, format="%.1f%%")
+        T_input = st.number_input("Horizonte (T años)", 1.0, 50.0, 10.0, 0.5)
+    
+    with st.sidebar.expander("2. Flujo Base (Continuo)", expanded=False):
+        st.markdown("Define $f(t) = A + B \cdot t$")
+        col_a, col_b = st.columns(2)
+        A_input = col_a.number_input("Inicial (A)", value=500.0, step=50.0)
+        B_input = col_b.number_input("Crecimiento (B)", value=50.0, step=10.0)
 
-    modelo = SolarisModel(r_input, T_input)
+    # Modelo inicial
+    modelo = SolarisModel(r_input, T_input, A_input, B_input)
 
-    if 'custom_shocks' not in st.session_state:
-        st.session_state.custom_shocks = []
-
+    # Gestión de Shocks (Eventos Discretos)
     st.sidebar.markdown("---")
-    st.sidebar.subheader("⚡ Gestión de Eventos")
-
-    base_shocks = [
-        ("A", "Subsidio Verde", 2.0, 100.0, "Política Gubernamental"),
-        ("B", "Fallo Inversores", 4.5, -80.0, "Fin de garantía"),
-        ("C", "Expansión Red", 7.0, 150.0, "Nueva infraestructura"),
-        ("D", "Riesgo Regulatorio", 1.5, -40.0, "Posible impuesto")
+    st.sidebar.subheader("⚡ Eventos Discretos")
+    
+    # Shocks Default
+    defaults = [
+        {"id": "S1", "nombre": "Subsidio Verde", "tiempo": 2.0, "magnitud": 100.0},
+        {"id": "S2", "nombre": "Fallo Inversores", "tiempo": 4.5, "magnitud": -80.0},
+        {"id": "S3", "nombre": "Expansión Red", "tiempo": 7.0, "magnitud": 150.0},
     ]
+    
+    # Estado de sesión para shocks custom
+    if 'custom_shocks' not in st.session_state:
+        st.session_state.custom_shocks = defaults
 
-    for sid, name, t, mag, desc in base_shocks:
-        # Aumentamos el ancho de la columna del checkbox para que no se corte
-        col_check, col_info = st.sidebar.columns([0.2, 0.8])
-        act = col_check.checkbox("", value=True, key=f"check_{sid}")
-        col_info.markdown(f"**{name}** <br><span style='font-size:0.8em; color:gray'>t={t} | Δ={mag}</span>", unsafe_allow_html=True)
-        if act:
-            modelo.add_shock(Shock(sid, name, t, mag, True, desc))
+    # Renderizar lista de shocks
+    shocks_to_process = []
+    shocks_data_for_cache = [] # Diccionarios simples para pasar a la función cacheada
 
-    if st.session_state.custom_shocks:
-        st.sidebar.markdown("---")
-        st.sidebar.caption("Eventos Personalizados")
-        for i, cs in enumerate(st.session_state.custom_shocks):
-            col_c1, col_c2, col_c3 = st.sidebar.columns([0.2, 0.65, 0.15])
-            act_c = col_c1.checkbox("", value=True, key=f"custom_check_{i}")
-            col_c2.markdown(f"**{cs['n']}** <br><span style='font-size:0.8em'>t={cs['t']} | Δ={cs['m']}</span>", unsafe_allow_html=True)
-            if col_c3.button("🗑️", key=f"del_{i}"):
-                st.session_state.custom_shocks.pop(i)
+    for idx, shock in enumerate(st.session_state.custom_shocks):
+        with st.sidebar.container():
+            c1, c2 = st.columns([0.8, 0.2])
+            # Checkbox estilizado visualmente con nombre y datos
+            is_active = c1.checkbox(
+                f"{shock['nombre']} (t={shock['tiempo']} | Δ={shock['magnitud']})", 
+                value=True, key=f"chk_{idx}"
+            )
+            if c2.button("✖", key=f"del_{idx}"):
+                st.session_state.custom_shocks.pop(idx)
                 st.rerun()
-            if act_c:
-                modelo.add_shock(Shock(f"C{i}", cs['n'], cs['t'], cs['m'], True))
+            
+            if is_active:
+                obj_shock = Shock(id=shock['id'], nombre=shock['nombre'], tiempo=shock['tiempo'], magnitud=shock['magnitud'])
+                modelo.add_shock(obj_shock)
+                shocks_to_process.append(obj_shock)
+                # Para el cache, necesitamos dicts serializables
+                shocks_data_for_cache.append(asdict(obj_shock))
 
-    with st.sidebar.expander("➕ Agregar Nuevo Evento", expanded=False):
-        with st.form("new_shock_form"):
-            new_name = st.text_input("Nombre", "Crisis X")
-            c1, c2 = st.columns(2)
-            new_time = c1.number_input("Año (t)", 0.0, 10.0, 5.0)
-            new_mag = c2.number_input("Impacto ($k)", value=-50.0)
-            submitted = st.form_submit_button("Añadir", use_container_width=True)
-            if submitted:
-                st.session_state.custom_shocks.append({"n": new_name, "t": new_time, "m": new_mag})
+    # Agregar nuevo shock
+    with st.sidebar.expander("➕ Agregar Evento", expanded=False):
+        with st.form("add_shock"):
+            n_name = st.text_input("Nombre", "Nuevo Evento")
+            c_t, c_m = st.columns(2)
+            n_time = c_t.number_input("Año", 0.0, T_input, 1.0)
+            n_mag = c_m.number_input("Impacto ($)", value=50.0)
+            if st.form_submit_button("Añadir"):
+                st.session_state.custom_shocks.append(
+                    {"id": f"C{len(st.session_state.custom_shocks)}", "nombre": n_name, "tiempo": n_time, "magnitud": n_mag}
+                )
                 st.rerun()
 
     # --- CÁLCULOS ---
     vpn_base = modelo.calcular_vpn_base()
-    shocks_calc = []
-    vpn_shocks = 0
-    for s in modelo.shocks:
-        val = modelo.calcular_potencial_shock(s)
-        shocks_calc.append({'nombre': s.nombre, 'valor': val})
-        vpn_shocks += val
+    impactos = []
+    for s in shocks_to_process:
+        val = modelo.calcular_impacto_shock(s)
+        impactos.append({"nombre": s.nombre, "valor": val, "tiempo": s.tiempo, "magnitud": s.magnitud})
     
+    vpn_shocks = sum(x['valor'] for x in impactos)
     vpn_total = vpn_base + vpn_shocks
 
-    # --- VISUALIZACIÓN ---
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("VPN Total (Híbrido)", f"${vpn_total:,.2f}", delta=f"{vpn_shocks:,.2f} vs Base")
-    kpi2.metric("VPN Base (Continuo)", f"${vpn_base:,.2f}")
-    kpi3.metric("Impacto Neto Eventos", f"${vpn_shocks:,.2f}", delta="Positivo" if vpn_shocks > 0 else "Negativo")
+    # --- DASHBOARD PRINCIPAL ---
+    
+    # 1. KPIs
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:,.0f} por eventos")
+    k2.metric("Valor Base (Continuo)", f"${vpn_base:,.0f}", delta="Estructural")
+    k3.metric("Impacto Eventos", f"${vpn_shocks:,.0f}", delta_color="off")
+    k4.metric("Tasa Efectiva", f"{r_input*100:.1f}%", f"T={T_input} años")
 
     st.markdown("---")
 
-    tab1, tab2 = st.tabs(["📈 Trayectoria Dinámica", "📊 Descomposición del Valor"])
+    # 2. Pestañas de Análisis
+    tab_chart, tab_waterfall, tab_sens, tab_data = st.tabs([
+        "📈 Trayectoria Dinámica", 
+        "🧱 Descomposición (Waterfall)", 
+        "🎯 Mapa de Sensibilidad", 
+        "📋 Datos"
+    ])
 
-    with tab1:
-        t, y_base, y_total = modelo.obtener_datos_grafica()
-        fig_traj = go.Figure()
+    # --- GRAFICO DE TRAYECTORIA ---
+    with tab_chart:
+        t, y_base, y_total = modelo.generar_trayectorias()
         
-        # Trayectoria Base (Línea punteada)
-        fig_traj.add_trace(go.Scatter(
-            x=t, y=y_base, mode='lines', name='Trayectoria Base',
-            line=dict(color='gray', width=2, dash='dash'),
-            hovertemplate='Base: $%{y:.0f}<extra></extra>'
+        fig = go.Figure()
+        # Area Base
+        fig.add_trace(go.Scatter(
+            x=t, y=y_base, mode='lines', name='Flujo Base',
+            line=dict(color='#4B5563', width=1, dash='dash'),
+            fill=None
         ))
-        
-        # Trayectoria Híbrida (Línea sólida)
-        fig_traj.add_trace(go.Scatter(
-            x=t, y=y_total, mode='lines', name='Trayectoria Híbrida',
-            fill='tonexty', fillcolor='rgba(31, 119, 180, 0.1)',
-            line=dict(color='#1f77b4', width=3),
-            hovertemplate='Total: $%{y:.0f}<extra></extra>'
+        # Area Total con Gradiente (simulado visualmente con fill tonexty)
+        fig.add_trace(go.Scatter(
+            x=t, y=y_total, mode='lines', name='Flujo Híbrido',
+            line=dict(color='#60A5FA', width=3),
+            fill='tonexty', # Rellena hasta la traza anterior (Base)
+            fillcolor='rgba(96, 165, 250, 0.1)'
         ))
-        
-        # Marcadores de Saltos
-        for s in modelo.shocks:
-            color = '#2ecc71' if s.magnitud > 0 else '#e74c3c'
-            fig_traj.add_vline(x=s.tiempo, line_width=1, line_dash="dot", line_color=color)
-            # Anotación estilo Desmos
-            fig_traj.add_annotation(
-                x=s.tiempo, y=min(y_base) if s.magnitud < 0 else max(y_total),
-                text=s.nombre, showarrow=False, yshift=10,
-                font=dict(size=10, color=color)
+
+        # Marcadores de eventos
+        for s in shocks_to_process:
+            color = '#34D399' if s.magnitud > 0 else '#F87171'
+            fig.add_vline(x=s.tiempo, line_dash="dot", line_color=color, opacity=0.6)
+            fig.add_annotation(
+                x=s.tiempo, y=max(y_total)*1.05,
+                text=s.nombre, showarrow=False,
+                font=dict(color=color, size=10),
+                yshift=10
             )
-            
-        fig_traj.update_layout(
-            title="Dinámica del Flujo de Caja", 
-            xaxis_title="Tiempo (Años)",
-            yaxis_title="Flujo de Caja ($k/año)", 
-            hovermode="x unified",
-            template="plotly_dark", # Usamos tema oscuro para coincidir con la config
-            height=500,
-            margin=dict(l=20, r=20, t=50, b=20)
-        )
-        st.plotly_chart(fig_traj, use_container_width=True)
 
-    with tab2:
-        labels = ["Base"] + [s['nombre'] for s in shocks_calc]
-        values = [vpn_base] + [s['valor'] for s in shocks_calc]
-        colors = ['#3498db'] + ['#2ecc71' if v >= 0 else '#e74c3c' for v in values[1:]]
-        text_labels = [f"${v:,.0f}" for v in values]
-
-        # Gráfica de Barras corregida
-        bar_obj = go.Bar(
-            x=labels, 
-            y=values,
-            marker_color=colors,
-            text=text_labels,
-            textposition='auto',
-            hovertemplate='%{x}: $%{y:,.2f}<extra></extra>'
-        )
-
-        fig_bar = go.Figure(data=[bar_obj])
-
-        fig_bar.update_layout(
-            title="Descomposición Modular del VPN",
-            yaxis_title="Valor Presente ($k)",
+        fig.update_layout(
+            title="Dinámica del Flujo de Caja Instantáneo",
+            xaxis_title="Tiempo (años)",
+            yaxis_title="Flujo ($/año)",
             template="plotly_dark",
+            hovermode="x unified",
+            height=450,
+            margin=dict(l=20, r=20, t=60, b=20),
+            legend=dict(orientation="h", y=1.02, yanchor="bottom", x=1, xanchor="right")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # --- WATERFALL CHART ---
+    with tab_waterfall:
+        # Preparar datos para Waterfall
+        wf_labels = ["Base Estructural"] + [x['nombre'] for x in impactos] + ["VPN Total"]
+        wf_values = [vpn_base] + [x['valor'] for x in impactos] + [0] # El último se calcula auto
+        
+        # El tipo 'waterfall' calcula los totales automáticamente si usamos 'relative' y 'total'
+        measure_types = ["absolute"] + ["relative"] * len(impactos) + ["total"]
+        wf_y = [vpn_base] + [x['valor'] for x in impactos] + [0] # El valor final es dummy para 'total'
+
+        fig_wf = go.Figure(go.Waterfall(
+            name="Composición", orientation="v",
+            measure=measure_types,
+            x=wf_labels,
+            y=wf_y,
+            textposition="outside",
+            text=[f"${v/1000:.1f}k" for v in wf_y[:-1]] + [f"${vpn_total/1000:.1f}k"],
+            connector={"line": {"color": "rgb(63, 63, 63)"}},
+            decreasing={"marker": {"color": "#F87171"}},
+            increasing={"marker": {"color": "#34D399"}},
+            totals={"marker": {"color": "#60A5FA"}}
+        ))
+
+        fig_wf.update_layout(
+            title="Descomposición del Valor (Acumulación)",
+            template="plotly_dark",
+            yaxis_title="Valor Presente Net ($)",
             height=500
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_wf, use_container_width=True)
+
+    # --- SENSIBILIDAD (HEATMAP) ---
+    with tab_sens:
+        st.markdown("#### Impacto de Tasa (r) vs Tiempo (T)")
+        st.caption("Calculando matriz de VPN en tiempo real...")
+        
+        # Usamos la función cacheada para rapidez
+        r_vals, t_vals, z_vals = calcular_matriz_sensibilidad(
+            A_input, B_input, 
+            max(0.01, r_input - 0.05), r_input + 0.05,
+            max(1.0, T_input - 5), T_input + 5,
+            shocks_data_for_cache
+        )
+
+        fig_hm = go.Figure(data=go.Heatmap(
+            z=z_vals, x=t_vals, y=r_vals,
+            colorscale='Viridis',
+            colorbar=dict(title="VPN ($)"),
+            hovertemplate='T: %{x:.1f} años<br>r: %{y:.1%}<br>VPN: $%{z:,.0f}<extra></extra>'
+        ))
+        
+        # Marcar el punto actual
+        fig_hm.add_trace(go.Scatter(
+            x=[T_input], y=[r_input], mode='markers',
+            marker=dict(color='red', symbol='x', size=12, line=dict(width=2, color='white')),
+            name='Escenario Actual'
+        ))
+
+        fig_hm.update_layout(
+            template="plotly_dark",
+            xaxis_title="Horizonte (T)",
+            yaxis_title="Tasa de Descuento (r)",
+            height=500
+        )
+        st.plotly_chart(fig_hm, use_container_width=True)
+
+    # --- TABLA DE DATOS ---
+    with tab_data:
+        # Crear DataFrame limpio
+        data_rows = [{"Componente": "Flujo Base", "Tiempo (t)": "-", "Magnitud (Flux)": f"{A_input} + {B_input}t", "VPN Impacto": vpn_base}]
+        for item in impactos:
+            data_rows.append({
+                "Componente": item['nombre'],
+                "Tiempo (t)": f"{item['tiempo']:.1f}",
+                "Magnitud (Flux)": f"{item['magnitud']:.2f}",
+                "VPN Impacto": item['valor']
+            })
+        
+        df = pd.DataFrame(data_rows)
+        
+        # Mostrar DataFrame estilizado
+        st.dataframe(
+            df.style.format({"VPN Impacto": "${:,.2f}"}),
+            use_container_width=True
+        )
+        
+        # Botón CSV
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "⬇️ Descargar Reporte CSV",
+            data=csv,
+            file_name="acumulacion_hibrida_reporte.csv",
+            mime="text/csv"
+        )
+
+def asdict(shock: Shock):
+    """Helper para convertir dataclass a dict para cacheo"""
+    return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
 
 if __name__ == "__main__":
     main()
