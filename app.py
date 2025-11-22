@@ -1,4 +1,3 @@
-%%writefile .streamlit/config.toml
 [theme]
 primaryColor="#1f77b4"
 backgroundColor="#0E1117"
@@ -7,7 +6,6 @@ textColor="#FAFAFA"
 font="sans serif"
 
 # 3. Escribir la aplicación
-%%writefile app.py
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
