@@ -82,24 +82,6 @@ class SolarisModel:
                 y_total += np.where(t >= s.tiempo, s.magnitud, 0)
         return t, y_base, y_total
 
-    # (Eliminamos las funciones de sistemas grises complejos para limpiar código)
-
-@st.cache_data
-def calcular_matriz_sensibilidad(A, B, r_start, r_end, t_start, t_end, shocks_data):
-    r_range = np.linspace(r_start, r_end, 20)
-    t_range = np.linspace(t_start, t_end, 20)
-    z_values = []
-    for r_val in r_range:
-        row = []
-        for t_val in t_range:
-            m = SolarisModel(r_val, t_val, A, B)
-            for s in shocks_data:
-                m.add_shock(Shock(**s))
-            vpn = m.calcular_vpn_base() + sum(m.calcular_impacto_shock(s) for s in m.shocks)
-            row.append(vpn)
-        z_values.append(row)
-    return r_range, t_range, np.array(z_values)
-
 # ---------- MAIN ----------
 
 def main():
@@ -177,8 +159,8 @@ def main():
 
     st.markdown("---")
 
-    # Tabs
-    tab_chart, tab_waterfall, tab_sens, tab_data = st.tabs(["📈 Trayectoria", "🧱 Descomposición", "🎯 Sensibilidad", "📋 Datos"])
+    # Tabs (Sin Sensibilidad)
+    tab_chart, tab_waterfall, tab_data = st.tabs(["📈 Trayectoria", "🧱 Descomposición", "📋 Datos"])
 
     with tab_chart:
         t, y_base, y_total = modelo.generar_trayectorias()
@@ -204,45 +186,36 @@ def main():
         fig_wf.update_layout(title="Descomposición del Valor", template="plotly_dark", height=500)
         st.plotly_chart(fig_wf, use_container_width=True)
 
-    with tab_sens:
-        r_vals, t_vals, z_vals = calcular_matriz_sensibilidad(
-            A_input, B_input, max(0.01, r_input - 0.05), r_input + 0.05, max(1.0, T_input - 5), T_input + 5, shocks_data_for_cache
-        )
-        fig_hm = go.Figure(data=go.Heatmap(z=z_vals, x=t_vals, y=r_vals, colorscale='Viridis'))
-        fig_hm.add_trace(go.Scatter(x=[T_input], y=[r_input], mode='markers', marker=dict(color='red', symbol='x', size=12)))
-        fig_hm.update_layout(template="plotly_dark", height=500, title="Sensibilidad VPN (r vs T)")
-        st.plotly_chart(fig_hm, use_container_width=True)
-    
     with tab_data:
         st.dataframe(pd.DataFrame(impactos))
 
     # ==============================================================================
-    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN (SOLICITUD DEL USUARIO)
+    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN DETALLADA
     # ==============================================================================
     
     st.markdown("---")
     st.subheader("🧮 Estructura del Operador Híbrido")
     st.markdown("El valor total ($\mathcal{H}_K$) se compone de la base continua más la acumulación discreta de los eventos de choque.")
 
-    # Construcción Dinámica de la Fórmula en LaTeX
-    # 1. Parte Simbólica
-    latex_formula = r"\mathcal{H}_K = (\text{Base})"
-    for s in impactos:
-        # Limpiamos nombres para LaTeX (quitamos espacios raros si los hubiera)
-        s_clean = s['nombre'].replace(" ", "\\;")
-        latex_formula += rf" + (\text{{{s_clean}}})"
-    
-    st.latex(latex_formula)
+    # 1. Formulación Matemática General
+    st.markdown("#### 1. Formulación Matemática")
+    st.latex(r"\mathcal{H}_K = \text{VPN}_{base} + \sum_{i=1}^{n} \text{Impacto}(E_i)")
 
-    # 2. Parte Numérica
-    st.markdown("#### Instanciación Numérica")
-    
-    # Construimos string tipo: "5,000 + 200 + (-50) = 5,150"
+    # 2. Desglose de Componentes (Nombres)
+    st.markdown("#### 2. Desglose de Componentes")
+    latex_formula_names = r"\mathcal{H}_K = (\text{Base})"
+    for s in impactos:
+        # Limpiamos nombres para LaTeX
+        s_clean = s['nombre'].replace(" ", "\\;")
+        latex_formula_names += rf" + (\text{{{s_clean}}})"
+    st.latex(latex_formula_names)
+
+    # 3. Instanciación Numérica (Valores)
+    st.markdown("#### 3. Instanciación Numérica")
     str_vals = f"{vpn_base:,.0f}"
     for s in impactos:
         val = s['valor']
-        sign = "+" if val >= 0 else "-" # Para que se vea + (50) o + (-50) o simplemente - 50
-        # Aquí usaremos el formato solicitado: + (Valor)
+        # Formato inteligente para signos: "+ (-50)" o "+ (50)"
         str_vals += rf" + ({val:,.0f})"
     
     st.latex(rf"""
