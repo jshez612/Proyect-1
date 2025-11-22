@@ -1,4 +1,3 @@
-
 %%writefile .streamlit/config.toml
 [theme]
 primaryColor="#1f77b4"
