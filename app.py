@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.special as sc
 from dataclasses import dataclass, asdict
-from typing import List
+from typing import List, Tuple  # <--- AQUÍ ESTABA EL ERROR, AHORA CORREGIDO
 import math
 
 # ---------- CONFIGURACIÓN GENERAL ----------
