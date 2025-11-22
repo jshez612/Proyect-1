@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dataclasses import dataclass, asdict
-from typing import List
+from typing import List, Tuple  # <--- AQUÍ ESTÁ LA CORRECCIÓN IMPRESCINDIBLE
 import math
 
 # ---------- CONFIGURACIÓN GENERAL ----------
@@ -117,12 +117,10 @@ class SolarisModel:
                 cf_base = self.A * np.exp(self.param_2 * yr)
             
             # 2. Shocks (Simplificación tradicional: Sumar al flujo del año si ocurre en ese año)
-            # En DCF tradicional, no se integra, se suma al CF del periodo.
             cf_shocks = 0.0
             for s in self.shocks:
                 # Si el shock ocurre durante este año (ej: entre año 1 y 2, se cobra en t=2)
                 if (yr - 1) < s.tiempo <= yr and s.activo:
-                    # En tradicional, a menudo se asume que el impacto es en el flujo de caja del año
                     cf_shocks += s.magnitud 
             
             total_cf = cf_base + cf_shocks
