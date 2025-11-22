@@ -82,16 +82,7 @@ class SolarisModel:
                 y_total += np.where(t >= s.tiempo, s.magnitud, 0)
         return t, y_base, y_total
 
-    def obtener_datos_discretos(self, n_points: int = 5) -> Tuple[np.ndarray, np.ndarray]:
-        t_discrete = np.linspace(max(0, self.T - n_points + 1), self.T, n_points)
-        y_vals = []
-        for ti in t_discrete:
-            val = self.A + self.B * ti
-            for s in self.shocks:
-                if s.activo and s.tiempo <= ti:
-                    val += s.magnitud
-            y_vals.append(val)
-        return t_discrete, np.array(y_vals)
+    # (Eliminamos las funciones de sistemas grises complejos para limpiar código)
 
 @st.cache_data
 def calcular_matriz_sensibilidad(A, B, r_start, r_end, t_start, t_end, shocks_data):
@@ -187,7 +178,7 @@ def main():
     st.markdown("---")
 
     # Tabs
-    tab_chart, tab_waterfall, tab_sens = st.tabs(["📈 Trayectoria", "🧱 Descomposición", "🎯 Sensibilidad"])
+    tab_chart, tab_waterfall, tab_sens, tab_data = st.tabs(["📈 Trayectoria", "🧱 Descomposición", "🎯 Sensibilidad", "📋 Datos"])
 
     with tab_chart:
         t, y_base, y_total = modelo.generar_trayectorias()
@@ -221,51 +212,42 @@ def main():
         fig_hm.add_trace(go.Scatter(x=[T_input], y=[r_input], mode='markers', marker=dict(color='red', symbol='x', size=12)))
         fig_hm.update_layout(template="plotly_dark", height=500, title="Sensibilidad VPN (r vs T)")
         st.plotly_chart(fig_hm, use_container_width=True)
+    
+    with tab_data:
+        st.dataframe(pd.DataFrame(impactos))
 
     # ==============================================================================
-    # APLICACIÓN MATEMÁTICA SIMPLIFICADA (1-AGO STANDARD)
+    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN (SOLICITUD DEL USUARIO)
     # ==============================================================================
     
     st.markdown("---")
-    st.subheader("🧮 Aplicación: Acumulación Híbrida Simplificada")
-    st.markdown("""
-    > Al eliminar los parámetros de ajuste fraccionario y prioridad, el operador regresa a su forma fundamental: 
-    > **La suma acumulada de la historia del sistema**.
-    """)
+    st.subheader("🧮 Estructura del Operador Híbrido")
+    st.markdown("El valor total ($\mathcal{H}_K$) se compone de la base continua más la acumulación discreta de los eventos de choque.")
 
-    # Tomamos 5 puntos representativos
-    n_sample = 5
-    t_disc, y_disc = modelo.obtener_datos_discretos(n_points=n_sample)
+    # Construcción Dinámica de la Fórmula en LaTeX
+    # 1. Parte Simbólica
+    latex_formula = r"\mathcal{H}_K = (\text{Base})"
+    for s in impactos:
+        # Limpiamos nombres para LaTeX (quitamos espacios raros si los hubiera)
+        s_clean = s['nombre'].replace(" ", "\\;")
+        latex_formula += rf" + (\text{{{s_clean}}})"
     
-    # Cálculo Simple (Acumulación Pura)
-    valor_acumulado = np.sum(y_disc)
+    st.latex(latex_formula)
 
-    c1, c2 = st.columns([1, 2])
-
-    with c1:
-        st.metric("Valor Acumulado ($\mathcal{H}_K$)", f"${valor_acumulado:,.0f}")
-        st.caption("Suma total de la muestra reciente")
-
-    with c2:
-        st.markdown("#### Fórmula Demonstrativa")
-        
-        # 1. LaTeX Simbólico
-        st.latex(r"\mathcal{H}_K = \sum_{i=1}^{n} x(i) = x_1 + x_2 + \dots + x_n")
-        
-        # 2. Construcción visual de la suma
-        # Formateamos los números para que se vean como una suma "100 + 200 + ..."
-        suma_str = " + ".join([f"{val:,.0f}" for val in y_disc])
-        
-        # Mostramos la ecuación con los números reales
-        st.markdown(f"""
-        $$
-        \mathcal{{H}}_K = {suma_str} = \mathbf{{ {valor_acumulado:,.0f} }}
-        $$
-        """)
-        
-        # Tabla de datos para verificar
-        st.caption("Datos de la muestra ($x_i$):")
-        st.dataframe(pd.DataFrame([y_disc], columns=[f"t={t:.1f}" for t in t_disc]), use_container_width=True)
+    # 2. Parte Numérica
+    st.markdown("#### Instanciación Numérica")
+    
+    # Construimos string tipo: "5,000 + 200 + (-50) = 5,150"
+    str_vals = f"{vpn_base:,.0f}"
+    for s in impactos:
+        val = s['valor']
+        sign = "+" if val >= 0 else "-" # Para que se vea + (50) o + (-50) o simplemente - 50
+        # Aquí usaremos el formato solicitado: + (Valor)
+        str_vals += rf" + ({val:,.0f})"
+    
+    st.latex(rf"""
+    \mathcal{{H}}_K = {str_vals} = \mathbf{{ {vpn_total:,.0f} }}
+    """)
 
 def asdict(shock: Shock):
     return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
