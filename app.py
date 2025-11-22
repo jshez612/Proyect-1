@@ -69,7 +69,6 @@ class SolarisModel:
         
         if self.mode == 'lineal':
             # f(t) = A + B*t
-            # Integral analítica de (A + Bt)e^-rt
             if abs(r) < 1e-9:
                 return A * T + 0.5 * p2 * T**2
             term_A = A * (1 - math.exp(-r * T)) / r
@@ -78,7 +77,6 @@ class SolarisModel:
             
         elif self.mode == 'exponencial':
             # f(t) = A * e^(g*t)
-            # Integral: A * e^((g-r)t)
             g = p2
             net_rate = r - g
             if abs(net_rate) < 1e-9:
@@ -227,31 +225,32 @@ def main():
     st.subheader("🧮 Estructura del Operador Híbrido")
     st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos.")
 
-    # 1. Formulación Matemática (Integral explícita)
-    st.markdown("#### 1. Formulación Matemática")
-    
-    # Construimos el LaTeX de la función f(t) según el modo seleccionado
+    # Definir string LaTeX de f(t) según selección
     if mode_sel == 'lineal':
-        # Formato: (A + Bt)
         ft_latex = rf"({A_input:,.0f} + {B_input:,.0f}t)"
     else:
-        # Formato: (A * e^gt)
         ft_latex = rf"({A_input:,.0f} \cdot e^{{{B_input}t}})"
-    
-    # LaTeX con Integral Definida
+
+    # 1. Formulación Matemática (Simbólica)
+    st.markdown("#### 1. Formulación Matemática")
     st.latex(rf"""
-    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{{T_input}}} {ft_latex} \cdot e^{{-{r_input}t}} dt }}_{{\text{{Base Continua}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
+    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Continuo}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
     """)
 
-    # 2. Desglose de Componentes
+    # 2. Desglose de Componentes (Integral Explícita + Nombres Shocks)
     st.markdown("#### 2. Desglose de Componentes")
-    latex_formula_names = r"\mathcal{H}_K = (\text{Integral Base})"
+    
+    # Creamos la representación visual de la integral con los datos reales dentro
+    integral_visual = rf"\left[ \int_{{0}}^{{{T_input}}} {ft_latex} e^{{-{r_input}t}} dt \right]"
+    
+    latex_formula_names = rf"\mathcal{{H}}_K = {integral_visual}"
     for s in impactos:
         s_clean = s['nombre'].replace(" ", "\\;")
         latex_formula_names += rf" + (\text{{{s_clean}}})"
+    
     st.latex(latex_formula_names)
 
-    # 3. Instanciación Numérica
+    # 3. Instanciación Numérica (Valores Finales)
     st.markdown("#### 3. Instanciación Numérica")
     str_vals = f"{vpn_base:,.0f}"
     for s in impactos:
