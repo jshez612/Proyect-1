@@ -23,12 +23,13 @@ st.markdown("""
     div[data-testid="metric-container"] {
         background-color: #1F2937;
         border: 1px solid #374151;
-        padding: 20px;
+        padding: 15px;
         border-radius: 12px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    div[data-testid="stMetricValue"] { color: #F3F4F6 !important; font-size: 1.8rem !important; }
+    div[data-testid="stMetricValue"] { color: #F3F4F6 !important; font-size: 1.6rem !important; }
     [data-testid="stSidebar"] { background-color: #111827; border-right: 1px solid #374151; }
+    .math-box { background-color: #262730; padding: 15px; border-radius: 5px; border-left: 3px solid #60A5FA; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -44,11 +45,12 @@ class Shock:
     descripcion: str = ""
 
 class SolarisModel:
-    def __init__(self, r: float, T: float, A: float, B: float):
+    def __init__(self, r: float, T: float, A: float, param_B_or_g: float, mode: str = 'lineal'):
         self.r = float(r)
         self.T = float(T)
         self.A = float(A)
-        self.B = float(B)
+        self.param_2 = float(param_B_or_g) # Puede ser B (pendiente) o g (growth)
+        self.mode = mode
         self.shocks: List[Shock] = []
 
     def add_shock(self, shock: Shock):
@@ -60,12 +62,30 @@ class SolarisModel:
         return (math.exp(-self.r * a) - math.exp(-self.r * b)) / self.r
 
     def calcular_vpn_base(self) -> float:
-        r, T, A, B = self.r, self.T, self.A, self.B
-        if abs(r) < 1e-9:
-            return A * T + 0.5 * B * T**2
-        term_A = A * (1 - math.exp(-r * T)) / r
-        term_B = B * ((1 - math.exp(-r * T)) / r**2 - T * math.exp(-r * T) / r)
-        return term_A + term_B
+        r = self.r
+        T = self.T
+        A = self.A
+        p2 = self.param_2
+        
+        if self.mode == 'lineal':
+            # f(t) = A + B*t
+            # Integral analítica de (A + Bt)e^-rt
+            if abs(r) < 1e-9:
+                return A * T + 0.5 * p2 * T**2
+            term_A = A * (1 - math.exp(-r * T)) / r
+            term_B = p2 * ((1 - math.exp(-r * T)) / r**2 - T * math.exp(-r * T) / r)
+            return term_A + term_B
+            
+        elif self.mode == 'exponencial':
+            # f(t) = A * e^(g*t)
+            # Integral: A * e^((g-r)t)
+            g = p2
+            net_rate = r - g
+            if abs(net_rate) < 1e-9:
+                return A * T
+            return A * (1 - math.exp(-net_rate * T)) / net_rate
+        
+        return 0.0
 
     def calcular_impacto_shock(self, shock: Shock) -> float:
         if not shock.activo or shock.tiempo >= self.T:
@@ -75,7 +95,11 @@ class SolarisModel:
 
     def generar_trayectorias(self, pasos: int = 500):
         t = np.linspace(0, self.T, pasos)
-        y_base = self.A + self.B * t
+        if self.mode == 'lineal':
+            y_base = self.A + self.param_2 * t
+        else:
+            y_base = self.A * np.exp(self.param_2 * t)
+            
         y_total = y_base.copy()
         for s in self.shocks:
             if s.activo and s.tiempo < self.T:
@@ -96,12 +120,20 @@ def main():
         r_input = st.slider("Tasa de Descuento (r)", 0.0, 0.25, 0.08, 0.005, format="%.1f%%")
         T_input = st.number_input("Horizonte (T años)", 1.0, 50.0, 10.0, 0.5)
     
-    with st.sidebar.expander("2. Flujo Base", expanded=False):
+    with st.sidebar.expander("2. Función Base f(t)", expanded=True):
+        tipo_funcion = st.selectbox("Modelo de Flujo", ["Lineal (A + Bt)", "Exponencial (A * e^gt)"])
+        
         col_a, col_b = st.columns(2)
         A_input = col_a.number_input("Inicial (A)", value=500.0, step=50.0)
-        B_input = col_b.number_input("Crecimiento (B)", value=50.0, step=10.0)
+        
+        if "Lineal" in tipo_funcion:
+            mode_sel = 'lineal'
+            B_input = col_b.number_input("Pendiente (B)", value=50.0, step=10.0, help="Cambio lineal por año")
+        else:
+            mode_sel = 'exponencial'
+            B_input = col_b.number_input("Crecimiento (g)", value=0.05, step=0.01, format="%.2f", help="Tasa de crecimiento compuesto")
 
-    modelo = SolarisModel(r_input, T_input, A_input, B_input)
+    modelo = SolarisModel(r_input, T_input, A_input, B_input, mode=mode_sel)
 
     # Shocks
     st.sidebar.markdown("---")
@@ -115,8 +147,7 @@ def main():
         st.session_state.custom_shocks = defaults
 
     shocks_to_process = []
-    shocks_data_for_cache = [] 
-
+    
     for idx, shock in enumerate(st.session_state.custom_shocks):
         with st.sidebar.container():
             c1, c2 = st.columns([0.8, 0.2])
@@ -128,7 +159,6 @@ def main():
                 obj_shock = Shock(id=shock['id'], nombre=shock['nombre'], tiempo=shock['tiempo'], magnitud=shock['magnitud'])
                 modelo.add_shock(obj_shock)
                 shocks_to_process.append(obj_shock)
-                shocks_data_for_cache.append(asdict(obj_shock))
 
     with st.sidebar.expander("➕ Agregar Evento", expanded=False):
         with st.form("add_shock"):
@@ -149,17 +179,17 @@ def main():
     
     vpn_shocks = sum(x['valor'] for x in impactos)
     vpn_total = vpn_base + vpn_shocks
+    variacion_pct = (vpn_shocks / vpn_base) * 100 if vpn_base != 0 else 0
 
-    # KPIs
+    # --- DASHBOARD ---
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:,.0f} eventos")
-    k2.metric("Valor Base", f"${vpn_base:,.0f}", delta="Estructural")
-    k3.metric("Impacto Eventos", f"${vpn_shocks:,.0f}", delta_color="off")
+    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:+,.0f} eventos")
+    k2.metric("Variación vs Base", f"{variacion_pct:+.1f}%", delta="Impacto Relativo", delta_color="off")
+    k3.metric("Valor Base", f"${vpn_base:,.0f}", delta="Estructural", delta_color="off")
     k4.metric("Tasa Efectiva", f"{r_input*100:.1f}%", f"T={T_input}")
 
     st.markdown("---")
 
-    # Tabs (Sin Sensibilidad)
     tab_chart, tab_waterfall, tab_data = st.tabs(["📈 Trayectoria", "🧱 Descomposición", "📋 Datos"])
 
     with tab_chart:
@@ -190,32 +220,42 @@ def main():
         st.dataframe(pd.DataFrame(impactos))
 
     # ==============================================================================
-    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN DETALLADA
+    # APLICACIÓN: FÓRMULA DE ACUMULACIÓN (MEJORADA)
     # ==============================================================================
     
     st.markdown("---")
     st.subheader("🧮 Estructura del Operador Híbrido")
-    st.markdown("El valor total ($\mathcal{H}_K$) se compone de la base continua más la acumulación discreta de los eventos de choque.")
+    st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos.")
 
-    # 1. Formulación Matemática General
+    # 1. Formulación Matemática (Integral explícita)
     st.markdown("#### 1. Formulación Matemática")
-    st.latex(r"\mathcal{H}_K = \text{VPN}_{base} + \sum_{i=1}^{n} \text{Impacto}(E_i)")
+    
+    # Construimos el LaTeX de la función f(t) según el modo seleccionado
+    if mode_sel == 'lineal':
+        # Formato: (A + Bt)
+        ft_latex = rf"({A_input:,.0f} + {B_input:,.0f}t)"
+    else:
+        # Formato: (A * e^gt)
+        ft_latex = rf"({A_input:,.0f} \cdot e^{{{B_input}t}})"
+    
+    # LaTeX con Integral Definida
+    st.latex(rf"""
+    \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{{T_input}}} {ft_latex} \cdot e^{{-{r_input}t}} dt }}_{{\text{{Base Continua}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
+    """)
 
-    # 2. Desglose de Componentes (Nombres)
+    # 2. Desglose de Componentes
     st.markdown("#### 2. Desglose de Componentes")
-    latex_formula_names = r"\mathcal{H}_K = (\text{Base})"
+    latex_formula_names = r"\mathcal{H}_K = (\text{Integral Base})"
     for s in impactos:
-        # Limpiamos nombres para LaTeX
         s_clean = s['nombre'].replace(" ", "\\;")
         latex_formula_names += rf" + (\text{{{s_clean}}})"
     st.latex(latex_formula_names)
 
-    # 3. Instanciación Numérica (Valores)
+    # 3. Instanciación Numérica
     st.markdown("#### 3. Instanciación Numérica")
     str_vals = f"{vpn_base:,.0f}"
     for s in impactos:
         val = s['valor']
-        # Formato inteligente para signos: "+ (-50)" o "+ (50)"
         str_vals += rf" + ({val:,.0f})"
     
     st.latex(rf"""
