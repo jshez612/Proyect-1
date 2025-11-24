@@ -373,6 +373,27 @@ def main():
             "VP (Descontado)": "${:,.2f}"
         }), use_container_width=True)
 
+    # ==============================================================================
+    # SECCIÓN: NOTA TÉCNICA Y ALCANCE (NUEVO AGREGADO)
+    # ==============================================================================
+    st.markdown("---")
+    with st.expander("ℹ️ Nota Técnica: Alcance y Aplicabilidad del Modelo", expanded=False):
+        st.markdown("""
+        ### 🎯 ¿Cuándo es ideal usar el Operador Híbrido ($\mathcal{H}_K$)?
+        Este modelo utiliza matemática de **tiempo continuo**, asumiendo que el valor se genera constantemente (como el agua fluyendo) y no en bloques anuales.
+
+        * **✅ Casos de Uso Óptimos (Economía Moderna):**
+            * **SaaS & Suscripciones:** Ingresos recurrentes diarios/mensuales (ej. Netflix, Spotify).
+            * **Utilities & Energía:** Generación eléctrica constante, peajes, telecomunicaciones.
+            * **Finanzas:** Valoración de derivados o activos de alta liquidez.
+
+        * **⚠️ Cuándo preferir el Método Tradicional:**
+            * **Flujos "Lumpy" (Agrupados):** Agricultura (una cosecha al año), Construcción (pagos contra entrega de hitos), Rentas inmobiliarias anuales.
+            * *Razón:* En estos casos, usar tiempo continuo podría "adelantar" valor teóricamente que en la práctica está bloqueado hasta fin de año.
+
+        **Conclusión:** La diferencia de valor mostrada arriba (**Delta Valor**) representa la **Captura de Valor por Continuidad**. El $\mathcal{H}_K$ elimina la pérdida de eficiencia que asume el método tradicional al esperar al final del periodo para contabilizar los flujos.
+        """)
+
 def asdict(shock: Shock):
     return {"id": shock.id, "nombre": shock.nombre, "tiempo": shock.tiempo, "magnitud": shock.magnitud, "activo": shock.activo, "descripcion": shock.descripcion}
 
