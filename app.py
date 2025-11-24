@@ -30,6 +30,7 @@ st.markdown("""
     div[data-testid="stMetricValue"] { color: #F3F4F6 !important; font-size: 1.6rem !important; }
     [data-testid="stSidebar"] { background-color: #111827; border-right: 1px solid #374151; }
     .math-box { background-color: #262730; padding: 15px; border-radius: 5px; border-left: 3px solid #60A5FA; }
+    hr { margin-top: 2rem; margin-bottom: 2rem; border: 0; border-top: 1px solid #374151; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -153,7 +154,7 @@ def main():
     col_title, col_logo = st.columns([4, 1])
     with col_title:
         st.title("💠 Operador de Acumulación Híbrida")
-        st.markdown("Calculadora de Valoración Dinámica")
+        st.markdown("### Calculadora de Valoración Dinámica ($H_K$)")
     
     # Sidebar
     st.sidebar.header("⚙️ Configuración")
@@ -237,25 +238,25 @@ def main():
 
     # --- DASHBOARD ---
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VPN Total", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:+,.0f} eventos")
-    k2.metric("Variación vs Base", f"{variacion_pct:+.1f}%", delta="Impacto Relativo", delta_color="off")
-    k3.metric("Valor Base", f"${vpn_base:,.0f}", delta="Estructural", delta_color="off")
+    k1.metric("VPN Total ($H_K$)", f"${vpn_total:,.0f}", delta=f"{vpn_shocks:+,.0f} eventos")
+    k2.metric("Impacto de Eventos", f"{variacion_pct:+.1f}%", delta="vs Valor Base", delta_color="off")
+    k3.metric("Valor Base (Sin Choques)", f"${vpn_base:,.0f}", delta="Estructural", delta_color="off")
     k4.metric("Tasa Efectiva", f"{r_input*100:.1f}%", f"T={T_input}")
 
     st.markdown("---")
 
-    tab_chart, tab_waterfall, tab_data = st.tabs(["📈 Trayectoria", "🧱 Descomposición", "📋 Datos"])
+    tab_chart, tab_waterfall, tab_data = st.tabs(["📈 Trayectoria Continua", "🧱 Descomposición de Valor", "📋 Datos Detallados"])
 
     with tab_chart:
         t, y_base, y_total = modelo.generar_trayectorias()
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=t, y=y_base, mode='lines', name='Base', line=dict(color='#4B5563', width=1, dash='dash')))
-        fig.add_trace(go.Scatter(x=t, y=y_total, mode='lines', name='Híbrido', line=dict(color='#60A5FA', width=3), fill='tonexty', fillcolor='rgba(96, 165, 250, 0.1)'))
+        fig.add_trace(go.Scatter(x=t, y=y_base, mode='lines', name='Flujo Base', line=dict(color='#4B5563', width=1, dash='dash')))
+        fig.add_trace(go.Scatter(x=t, y=y_total, mode='lines', name='Flujo Híbrido (Real)', line=dict(color='#60A5FA', width=3), fill='tonexty', fillcolor='rgba(96, 165, 250, 0.1)'))
         for s in shocks_to_process:
             color = '#34D399' if s.magnitud > 0 else '#F87171'
             fig.add_vline(x=s.tiempo, line_dash="dot", line_color=color)
             fig.add_annotation(x=s.tiempo, y=max(y_total)*1.05, text=s.nombre, showarrow=False, font=dict(color=color, size=10))
-        fig.update_layout(title="Dinámica del Flujo", template="plotly_dark", height=450, hovermode="x unified")
+        fig.update_layout(title="Dinámica del Flujo en Tiempo Continuo", template="plotly_dark", height=450, hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
     with tab_waterfall:
@@ -267,7 +268,7 @@ def main():
             text=[f"${v/1000:.1f}k" for v in wf_y[:-1]] + [f"${vpn_total/1000:.1f}k"],
             connector={"line": {"color": "rgb(63, 63, 63)"}}, decreasing={"marker": {"color": "#F87171"}}, increasing={"marker": {"color": "#34D399"}}, totals={"marker": {"color": "#60A5FA"}}
         ))
-        fig_wf.update_layout(title="Descomposición del Valor", template="plotly_dark", height=500)
+        fig_wf.update_layout(title="Descomposición del Valor por Fuentes", template="plotly_dark", height=500)
         st.plotly_chart(fig_wf, use_container_width=True)
 
     with tab_data:
@@ -278,8 +279,8 @@ def main():
     # ==============================================================================
     
     st.markdown("---")
-    st.subheader("🧮 Estructura del Operador Híbrido")
-    st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos.")
+    st.subheader("🧮 Estructura Matemática del Operador Híbrido")
+    st.markdown("El valor total ($\mathcal{H}_K$) se compone de la **integral del flujo base continuo** más la **acumulación discreta** de los eventos en el momento exacto $t$.")
 
     if mode_sel == 'lineal':
         ft_latex = rf"({A_input:,.0f} + {B_input:,.0f}t)"
@@ -287,35 +288,30 @@ def main():
         ft_latex = rf"({A_input:,.0f} \cdot e^{{{B_input}t}})"
 
     # 1. Formulación
-    st.markdown("#### 1. Formulación Matemática")
+    st.markdown("#### 1. Definición Teórica")
     st.latex(rf"""
     \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Base Continua}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
     """)
 
     # 2. Desglose
-    st.markdown("#### 2. Desglose de Componentes")
+    st.markdown("#### 2. Componentes Numéricos")
     integral_visual = rf"\left[ \int_{{0}}^{{{T_input}}} {ft_latex} e^{{-{r_input}t}} dt \right]"
     latex_formula_names = rf"\mathcal{{H}}_K = {integral_visual}"
     for s in impactos:
         s_clean = s['nombre'].replace(" ", "\\;")
         latex_formula_names += rf" + (\text{{{s_clean}}})"
     st.latex(latex_formula_names)
-
+    
     # 3. Instanciación
-    st.markdown("#### 3. Instanciación Numérica")
-    str_vals = f"{vpn_base:,.0f}"
-    for s in impactos:
-        val = s['valor']
-        str_vals += rf" + ({val:,.0f})"
-    st.latex(rf"\mathcal{{H}}_K = {str_vals} = \mathbf{{ {vpn_total:,.0f} }}")
+    st.latex(rf"\mathcal{{H}}_K = {vpn_base:,.0f} + \sum \text{{Eventos}} = \mathbf{{ {vpn_total:,.0f} }}")
 
     # ==============================================================================
     # SECCIÓN: DESGLOSE ANALÍTICO (Expander)
     # ==============================================================================
     
-    with st.expander("🔎 Desglose: ¿Cómo se calcula el valor de cada Choque?", expanded=False):
+    with st.expander("🔎 Detalle del Cálculo de Choques (Función de Impulso)", expanded=False):
         st.markdown(r"""
-        El valor presente de un choque de magnitud $\Delta$ en $t$ se calcula con:
+        El valor presente de un choque de magnitud $\Delta$ en el tiempo $t$ se calcula descontando la diferencia de valor generada desde $t$ hasta $T$:
         $$ \text{Valor}(E_i) = \Delta \times \int_{t}^{T} e^{-r \tau} d\tau = \Delta \times \left[ \frac{e^{-r t} - e^{-r T}}{r} \right] $$
         """)
         
@@ -328,17 +324,18 @@ def main():
                     "Valor Presente": "${:,.2f}"
                 }), use_container_width=True)
         else:
-            st.info("No hay eventos activos.")
+            st.info("No hay eventos activos para calcular.")
 
     # ==============================================================================
-    # NUEVA SECCIÓN: COMPARATIVA CON MÉTODO TRADICIONAL
+    # SECCIÓN: COMPARATIVA CON MÉTODO TRADICIONAL
     # ==============================================================================
 
     st.markdown("---")
-    st.subheader("🆚 Benchmarking: Híbrido ($\mathcal{H}_K$) vs. Tradicional (DCF)")
+    st.subheader("🆚 Benchmarking: Enfoque Continuo ($H_K$) vs. Discreto (DCF Tradicional)")
     st.markdown("""
-    Comparativa en tiempo real contra el método tradicional de Flujos de Caja Descontados (DCF), 
-    que asume flujos discretos al final de cada año ($t=1, 2, ..., T$).
+    Esta sección compara la precisión del Operador Híbrido frente al método estándar de la industria.
+    El método tradicional asume la **"Convención de Fin de Año"**, lo que implica que el dinero generado durante el año 
+    no se contabiliza hasta que el año termina ($t=1, 2...$), perdiendo valor temporal.
     """)
 
     # Calcular tradicional
@@ -351,18 +348,23 @@ def main():
     c_bench_1, c_bench_2 = st.columns([1, 1])
 
     with c_bench_1:
-        st.markdown("**Resultados Comparativos**")
-        st.metric("Método Híbrido (Continuo)", f"${vpn_total:,.0f}")
-        st.metric("Método Tradicional (Discreto)", f"${vpn_trad:,.0f}")
+        st.markdown("### 📊 Resultados Comparativos")
+        st.metric("Método Híbrido (Tiempo Continuo)", f"${vpn_total:,.0f}", help="Captura el valor en el instante exacto")
+        st.metric("Método Tradicional (Tiempo Discreto)", f"${vpn_trad:,.0f}", help="Asume flujos al 31 de Dic de cada año")
         
     with c_bench_2:
-        st.markdown("**Diferencia (Precisión Ganada)**")
-        st.metric("Delta Valor", f"${diff_val:,.0f}", delta=f"{diff_pct:+.2f}% vs Tradicional")
-        st.info("La diferencia surge porque el Método Híbrido captura el valor del dinero exacto en el tiempo continuo, mientras que el tradicional 'redondea' al final del año.")
+        st.markdown("### 💡 Análisis de Divergencia")
+        st.metric("Captura por Continuidad", f"${diff_val:,.0f}", delta=f"{diff_pct:+.2f}% vs Tradicional")
+        st.info("""
+        **¿Por qué difieren?**
+        El **Delta** positivo indica el valor que el método tradicional "pierde" por retrasar contablemente los flujos.
+        El Operador Híbrido reinvierte teóricamente cada centavo en el momento en que se genera.
+        """)
 
     # Visualización de la fórmula tradicional para contraste
-    st.markdown("#### Procedimiento Tradicional")
-    st.latex(r"\text{VPN}_{trad} = \sum_{t=1}^{T} \frac{\text{Flujo}_t}{(1+r)^t}")
+    st.markdown("#### Formulación del Método Tradicional (Referencia)")
+    st.latex(r"\text{VPN}_{trad} = \sum_{t=1}^{T} \frac{\text{Flujo Acumulado Año}_t}{(1+r)^t}")
+    st.caption("Nota: $t$ asume solo valores enteros (1, 2, 3...), ignorando la generación de valor intra-anual.")
     
     with st.expander("Ver tabla de cálculo Tradicional (Año a Año)", expanded=False):
         st.dataframe(df_trad.style.format({
@@ -374,7 +376,7 @@ def main():
         }), use_container_width=True)
 
     # ==============================================================================
-    # SECCIÓN: NOTA TÉCNICA Y ALCANCE (NUEVO AGREGADO)
+    # SECCIÓN: NOTA TÉCNICA Y ALCANCE
     # ==============================================================================
     st.markdown("---")
     with st.expander("ℹ️ Nota Técnica: Alcance y Aplicabilidad del Modelo", expanded=False):
@@ -386,12 +388,12 @@ def main():
             * **SaaS & Suscripciones:** Ingresos recurrentes diarios/mensuales (ej. Netflix, Spotify).
             * **Utilities & Energía:** Generación eléctrica constante, peajes, telecomunicaciones.
             * **Finanzas:** Valoración de derivados o activos de alta liquidez.
-
+        
         * **⚠️ Cuándo preferir el Método Tradicional:**
             * **Flujos "Lumpy" (Agrupados):** Agricultura (una cosecha al año), Construcción (pagos contra entrega de hitos), Rentas inmobiliarias anuales.
             * *Razón:* En estos casos, usar tiempo continuo podría "adelantar" valor teóricamente que en la práctica está bloqueado hasta fin de año.
 
-        **Conclusión:** La diferencia de valor mostrada arriba (**Delta Valor**) representa la **Captura de Valor por Continuidad**. El $\mathcal{H}_K$ elimina la pérdida de eficiencia que asume el método tradicional al esperar al final del periodo para contabilizar los flujos.
+        **Conclusión:** La diferencia mostrada arriba representa la **eficiencia matemática** del modelo continuo para negocios de alta frecuencia.
         """)
 
 def asdict(shock: Shock):
