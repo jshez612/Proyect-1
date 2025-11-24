@@ -293,29 +293,33 @@ def main():
     \mathcal{{H}}_K = \underbrace{{ \int_{{0}}^{{T}} f(t) \cdot e^{{-rt}} dt }}_{{\text{{Base Continua}}}} + \sum_{{i=1}}^{{n}} \text{{Impacto}}(E_i)
     """)
 
-    # 2. Desglose Numérico Exacto (NUEVA SECCIÓN SOLICITADA)
-    st.markdown("#### 2. Comprobación Numérica Exacta")
-    st.markdown("A continuación se muestra la suma de los valores exactos calculados para cada componente:")
+    # 2. Desglose
+    st.markdown("#### 2. Componentes Numéricos")
+    integral_visual = rf"\left[ \int_{{0}}^{{{T_input}}} {ft_latex} e^{{-{r_input}t}} dt \right]"
+    latex_formula_names = rf"\mathcal{{H}}_K = {integral_visual}"
+    for s in impactos:
+        s_clean = s['nombre'].replace(" ", "\\;")
+        latex_formula_names += rf" + (\text{{{s_clean}}})"
+    st.latex(latex_formula_names)
+    
+    # 3. Instanciación
+    st.latex(rf"\mathcal{{H}}_K = {vpn_base:,.0f} + \sum \text{{Eventos}} = \mathbf{{ {vpn_total:,.0f} }}")
 
-    # Construir la ecuación dinámica con llaves (underbraces) para identificar cada componente
-    latex_sum = rf"\underbrace{{ {vpn_base:,.2f} }}_{{\text{{Base Continua}}}}"
+    # --- NUEVA LÍNEA SOLICITADA ---
+    # Generación dinámica del desglose detallado
+    linea_detallada = rf"\text{{Base Continua}}\; {vpn_base:,.2f}"
+    for imp in impactos:
+        # Quitamos espacios para que quede como 'SubsidioVerde'
+        nombre_sin_espacios = imp['nombre'].replace(" ", "")
+        val = imp['valor']
+        if val >= 0:
+            linea_detallada += rf" + \text{{{nombre_sin_espacios}}}\; {val:,.2f}"
+        else:
+            linea_detallada += rf" - \text{{{nombre_sin_espacios}}}\; {abs(val):,.2f}"
     
-    for item in impactos:
-        # Limpiar nombre para LaTeX (espacios a \;)
-        clean_name = item['nombre'].replace(" ", "\\;")
-        # Determinar signo
-        val = item['valor']
-        sign = "+" if val >= 0 else "-"
-        abs_val = abs(val)
-        
-        # Añadir al string de Latex
-        latex_sum += rf" {sign} \underbrace{{ {abs_val:,.2f} }}_{{\text{{{clean_name}}}}}"
-    
-    # Añadir resultado final
-    latex_sum += rf" = \mathbf{{ {vpn_total:,.2f} }}"
-    
-    # Renderizar
-    st.latex(latex_sum)
+    linea_detallada += rf" = {vpn_total:,.2f}"
+    st.latex(linea_detallada)
+    # ------------------------------
 
     # ==============================================================================
     # SECCIÓN: DESGLOSE ANALÍTICO (Expander)
